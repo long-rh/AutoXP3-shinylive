@@ -1,0 +1,7 @@
+exe/
+exe.zip
+
+# renv — library binaries are local; only the lockfile is committed
+myapp/renv/library/
+myapp/renv/staging/
+myapp/renv/sandbox/

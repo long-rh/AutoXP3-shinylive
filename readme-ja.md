@@ -6,6 +6,8 @@
 
 ## 目次
 
+- [リポジトリ構成](#リポジトリ構成)
+- [インストール](#インストール)
 1. [AutoXP3 とは](#1-autoxp3-とは)
 2. [Excel テンプレートの準備](#2-excel-テンプレートの準備)
 3. [データのアップロード（1. Data タブ）](#3-データのアップロード1-data-タブ)
@@ -13,6 +15,63 @@
 5. [予測の可視化（3. Analyze タブ）](#5-予測の可視化3-analyze-タブ)
 6. [次の実験点の提案（4. Optimize タブ）](#6-次の実験点の提案4-optimize-タブ)
 7. [結果の保存](#7-結果の保存)
+8. [アプリなしで結果を再現する](#8-アプリなしで結果を再現する)
+
+---
+
+## 主なファイル
+
+| パス | 内容 |
+|---|---|
+| `myapp/` | R Shiny アプリ全体（サーバー・UI・Excel テンプレート） |
+| `myapp/R/` | セミパラメトリック・ベイズ回帰本体（GP カーネル・UCB・標準化・バリデーション） |
+| `REPRODUCTION_PROMPT.md` | アプリなしで解析パイプライン全体を再現するための AI 用プロンプト |
+| `readme-ja.md` | このファイル — 日本語マニュアル |
+| `template.xlsx` | Excelテンプレート |
+
+---
+
+## インストール
+
+### A — ブラウザで使う（R不要）
+
+以下のリンクを開くだけで使えます。インストール不要：
+
+**https://long-rh.github.io/AutoXP3-shinylive/**
+
+WebAssembly（[Shinylive](https://shiny.posit.co/py/docs/shinylive.html)）によりブラウザ内で R が動作します。
+
+### B — ローカルで動かす
+
+#### ステップ 1 — R をインストールする（R ≥ 4.1 が既にある場合はスキップ）
+
+公式 CRAN サイトから OS に合ったインストーラーをダウンロードして実行します：
+
+| OS | インストーラー |
+|---|---|
+| Windows | https://cran.r-project.org/bin/windows/base/ |
+| macOS | https://cran.r-project.org/bin/macosx/ |
+| Linux | https://cran.r-project.org/bin/linux/ |
+
+通常のシステムインストールで問題ありません。パッケージの隔離は次のステップの `renv` が行うため、同一マシン上の他の R プロジェクトと競合しません。
+
+#### ステップ 2 — クローンとセットアップ
+
+```bash
+git clone https://github.com/<your-account>/AutoXP3.git
+cd AutoXP3/myapp
+Rscript setup.R
+```
+
+`setup.R` は [**renv**](https://rstudio.github.io/renv/) を使って `shiny`・`readxl`・`writexl` をプロジェクト専用ライブラリ（`myapp/renv/library/`）にインストールします。システムの他の R パッケージとは完全に分離されます。マシンごとに1回だけ実行してください。
+
+#### ステップ 3 — アプリを起動する
+
+```bash
+Rscript -e "shiny::runApp('.')"
+```
+
+> **注**: `renv/library/` は `.gitignore` で除外されています。初回実行後に `renv.lock` を commit することで、パッケージのバージョンがリポジトリに記録されます。
 
 ---
 
@@ -365,4 +424,52 @@ Constraints シートに制約式が記載されている場合、候補グリ�
 
 ---
 
+## 8. アプリなしで結果を再現する
+
+`REPRODUCTION_PROMPT.md` は、AI アシスタント（または開発者）が Shiny アプリを起動せずに、Excel ファイルだけから AutoXP3 の解析パイプライン全体を再現し、**「Save Result」と同形式の `.xlsx`** を出力するための機械可読仕様書です。
+
+### 8.1 内容の概要
+
+`myapp/R/` 以下の R 関数を参照しながら、計算の全ステップを正確に定義しています。
+
+| セクション | 内容 |
+|---|---|
+| §0 前提 | 既定ハイパーパラメータ・ファイル構成・`set.seed(1)` ルール |
+| §1 Excel パース | `parse_purpose()`・1D 候補リスト規則・カテゴリ水準の取得 |
+| §2 標準化 | `standardize_fit()`・`prior_to_standardized_scale()`・`beta_to_original_scale()` |
+| §3 ベイズフィット | `fit_semiparam_bayes()` の入出力・カーネル構成 |
+| §4 候補生成 | LHS + コーナー格子（≤ 100 + 2048 点）・派生変数・制約フィルタリング |
+| §5 予測 | `predict_semiparam_bayes()`（`var_total = σ² + v_gp + v_beta` 使用） |
+| §6 訓練セット指標 | 原スケール残差から R²・RMSE・eps var. を再計算 |
+| §7 UCB と満足度 | `ucb_score()` の分岐ロジック・個別 Y 満足度と幾何平均 |
+| §8 スコープ結合 | `make_scope_df()`・重複除去・並び替え・`cand1..N` 採番 |
+| §9 Excel 出力 | シート順・`Fit info` 行フォーマット（`sprintf` 仕様）・`Optimize` シート列 |
+| §10 数値精度 | `round(..., 4)`・`jitter = 1e-8`・タイムスタンプ形式 |
+| §12 参照出力例 | Sample8 の `Fit info` 期待値（数値検証用） |
+| §13 注意点 | よくある間違い（事前分布スケール、LHS シード、`var_total` など） |
+
+### 8.2 使いどころ
+
+- 複数の Excel ファイルをコマンドラインで**バッチ処理**したい
+- 最適化ロジックを自分の R または Python ワークフローに**組み込みたい**
+- **GUI を使わず**に AI に Save Result Excel を生成させたい
+- 独自実装が AutoXP3 の数値出力と一致するか**検証**したい
+
+### 8.3 AI との使い方
+
+1. R コードを実行できる AI アシスタント（例：Claude）との会話を開く
+2. `REPRODUCTION_PROMPT.md` と入力 Excel ファイルを添付する
+3. 次のようなプロンプトを送る：
+
+   > 「REPRODUCTION_PROMPT.md に記載された R 関数の仕様に従って、添付の Excel ファイルを処理し、Save Result 形式の出力を生成してください。ハイパーパラメータは §0 の既定値を使用してください。」
+
+4. AI が仕様書のステップに従って処理し、アプリと同じ `Data`・`Definition`・`Fit info`・`Optimize` シートを含む `.xlsx` を生成する
+
+### 8.4 数値検証
+
+`AutoXP3_samples_split/` フォルダの `Sample8.xlsx` を参照ファイルとして使用できます。プロンプトの §12 に `Fit info` シートの期待値が記載されています（例：切片 = `+21.559403`、R² = `0.9998`）。これらが一致すれば実装は正しいと判断できます。
+
+---
+
 *Semi-parametric Bayesian Regression · Gaussian Process · UCB Acquisition · Bayesian Optimization*
+   

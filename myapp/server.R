@@ -850,8 +850,8 @@ shinyServer(function(input, output, session) {
       # ── Optimize シート: 候補があれば保存 ──
       if (!is.null(rv$cand) && nrow(rv$cand) > 0) {
         opt_df <- rv$cand
-        if ("Rank in scope" %in% names(opt_df)) {
-          opt_df[["Rank in scope"]] <- as.integer(opt_df[["Rank in scope"]])
+        if ("Rank" %in% names(opt_df)) {
+          opt_df[["Rank"]] <- as.integer(opt_df[["Rank"]])
         }
         sheets_list[["Optimize"]] <- opt_df
       }
@@ -1166,7 +1166,7 @@ shinyServer(function(input, output, session) {
       actionButton("btn_suggest", "Suggest next experiments", class = "btn-wide btn-primary"),
       div(class = "note", style = "margin-top:6px;",
           paste0("Fitted Y: ", fitted_label,
-                 " — Overall desirability D = geometric mean of individual desirabilities"))
+                 " | Optimize Yn: top 2 per Y (κ=0) | Optimize All: top 3 by desirability D (geometric mean, κ=0) | Explore Yn: top 2 per Y (κ=2)"))
     )
   })
 
@@ -1354,81 +1354,93 @@ shinyServer(function(input, output, session) {
       base_df[[paste0("SD.", yn)]]   <- all_sd[[yn]]
     }
     
-    make_scope_df <- function(mode, target_y, desirability, n_top) {
+    make_scope_df <- function(scope_label, desirability, n_top, mode_key, target_y_key) {
       tmp <- base_df
       tmp$Desirability <- desirability
-      tmp$Mode <- mode
-      tmp$TargetY <- target_y
-      
+      tmp$.mode_key    <- mode_key
+      tmp$.target_key  <- target_y_key
+      tmp$Scope        <- scope_label
+
       tmp <- tmp[order(tmp$Desirability, decreasing = TRUE), , drop = FALSE]
       tmp <- head(tmp, n_top)
       tmp$RankInScope <- as.integer(seq_len(nrow(tmp)))
       tmp
     }
-    
+
     result_list <- list()
-    
+
+    # ── Per-Y Optimize: 2 candidates each ────────────────
     for (yn in names(all_mu)) {
       result_list[[paste0("opt_", yn)]] <- make_scope_df(
-        mode = "Optimize",
-        target_y = yn,
+        scope_label = paste("Optimize", yn),
         desirability = compute_single_y_desirability(yn, 0.0),
-        n_top = 3
+        n_top = 2,
+        mode_key = "Optimize",
+        target_y_key = yn
       )
     }
-    
+
+    # ── Optimize All: desirability geometric mean ─────────
     result_list[["opt_all"]] <- make_scope_df(
-      mode = "Optimize",
-      target_y = "All",
+      scope_label = "Optimize All",
       desirability = compute_D(0.0),
-      n_top = 5
+      n_top = 3,
+      mode_key = "Optimize",
+      target_y_key = "All"
     )
-    
+
+    # ── Per-Y Explore: 2 candidates each ─────────────────
     for (yn in names(all_mu)) {
       result_list[[paste0("exp_", yn)]] <- make_scope_df(
-        mode = "Explore",
-        target_y = yn,
+        scope_label = paste("Explore", yn),
         desirability = compute_single_y_desirability(yn, 2.0),
-        n_top = 3
+        n_top = 2,
+        mode_key = "Explore",
+        target_y_key = yn
       )
     }
-    
-    result_list[["exp_all"]] <- make_scope_df(
-      mode = "Explore",
-      target_y = "All",
-      desirability = compute_D(2.0),
-      n_top = 5
-    )
-    
+
     combined <- do.call(rbind, result_list)
-    
+
+    # 同一スコープ内での重複除去
     key_in_scope <- do.call(
       paste,
-      c(combined[c("Mode", "TargetY", Xnames)], sep = "\r")
+      c(combined[c("Scope", Xnames)], sep = "\r")
     )
     combined <- combined[!duplicated(key_in_scope), , drop = FALSE]
-    
-    combined$Mode    <- factor(combined$Mode, levels = c("Optimize", "Explore"))
-    combined$TargetY <- factor(combined$TargetY, levels = c(names(all_mu), "All"))
-    
+
+    # ソート順: Optimize Y > Optimize All > Explore Y
+    scope_levels <- c(
+      paste("Optimize", names(all_mu)),
+      "Optimize All",
+      paste("Explore", names(all_mu))
+    )
+    combined$Scope <- factor(combined$Scope, levels = scope_levels)
+    combined$.mode_key   <- factor(combined$.mode_key,   levels = c("Optimize", "Explore"))
+    combined$.target_key <- factor(combined$.target_key, levels = c(names(all_mu), "All"))
+
     combined <- combined[
-      order(combined$Mode, combined$TargetY, combined$RankInScope),
-      ,
-      drop = FALSE
+      order(combined$.mode_key, combined$.target_key, combined$RankInScope),
+      , drop = FALSE
     ]
-    
+
+    # 内部キー列を削除
+    combined$.mode_key   <- NULL
+    combined$.target_key <- NULL
+
     rownames(combined) <- NULL
     combined <- cbind(Candidate = paste0("cand", seq_len(nrow(combined))), combined)
-    
+
     num_cols <- names(combined)[sapply(combined, is.numeric)]
     for (nm in setdiff(num_cols, "RankInScope")) {
       combined[[nm]] <- round(combined[[nm]], 4)
     }
     combined$RankInScope <- as.integer(combined$RankInScope)
-    
-    names(combined)[names(combined) == "RankInScope"] <- "Rank in scope"
-    
-    front_cols <- c("Candidate", "Mode", "TargetY", "Rank in scope", "Desirability")
+
+    names(combined)[names(combined) == "RankInScope"] <- "Rank"
+    names(combined)[names(combined) == "Desirability"] <- "Score"
+
+    front_cols <- c("Candidate", "Scope", "Rank", "Score")
     other_cols <- setdiff(names(combined), front_cols)
     combined <- combined[, c(front_cols, other_cols), drop = FALSE]
     
@@ -1437,17 +1449,17 @@ shinyServer(function(input, output, session) {
 
   output$tbl_candidates <- renderTable({
     req(rv$cand)
-    
+
     df <- rv$cand
-    front_cols <- c("Candidate", "Mode", "TargetY", "Rank in scope", "Desirability")
+    front_cols <- c("Candidate", "Scope", "Rank", "Score")
     x_cols     <- rv$X_names
     pred_cols  <- grep("^Pred\\.", names(df), value = TRUE)
     sd_cols    <- grep("^SD\\.", names(df), value = TRUE)
-    
+
     show_cols <- c(front_cols, x_cols, pred_cols, sd_cols)
     show_cols <- show_cols[show_cols %in% names(df)]
-    
-    head(df[, show_cols, drop = FALSE], 30)
+
+    head(df[, show_cols, drop = FALSE], 60)
   }, striped = FALSE, bordered = TRUE, hover = TRUE)
 
 })

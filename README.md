@@ -6,6 +6,8 @@
 
 ## Table of Contents
 
+- [Repository Structure](#repository-structure)
+- [Installation](#installation)
 1. [What is AutoXP3?](#1-what-is-autoxp3)
 2. [Preparing the Excel Template](#2-preparing-the-excel-template)
 3. [Uploading Data (1. Data Tab)](#3-uploading-data-1-data-tab)
@@ -13,6 +15,63 @@
 5. [Visualizing Predictions (3. Analyze Tab)](#5-visualizing-predictions-3-analyze-tab)
 6. [Suggesting Next Experiments (4. Optimize Tab)](#6-suggesting-next-experiments-4-optimize-tab)
 7. [Saving Results](#7-saving-results)
+8. [Reproducing Results Without the App](#8-reproducing-results-without-the-app)
+
+---
+
+## Core files
+
+| Path | Description |
+|---|---|
+| `myapp/` | Full R Shiny application source (server, UI, Excel template) |
+| `myapp/R/` | Semi-parametric Bayesian regression core (GP kernel, UCB, standardization, validation) |
+| `REPRODUCTION_PROMPT.md` | Machine-readable prompt for AI to reproduce the full pipeline without the app |
+| `readme-ja.md` | Japanese user manual |
+| `template.xlsx` | Input template |
+
+---
+
+## Installation
+
+### Option A — Browser (no R required)
+
+Open the link below — no installation needed:
+
+**https://long-rh.github.io/AutoXP3-shinylive/**
+
+R runs entirely in the browser via WebAssembly ([Shinylive](https://shiny.posit.co/py/docs/shinylive.html)).
+
+### Option B — Run locally
+
+#### Step 1 — Install R (skip if R ≥ 4.1 is already installed)
+
+Download and run the installer for your OS from the official CRAN site:
+
+| OS | Installer |
+|---|---|
+| Windows | https://cran.r-project.org/bin/windows/base/ |
+| macOS | https://cran.r-project.org/bin/macosx/ |
+| Linux | https://cran.r-project.org/bin/linux/ |
+
+This is a standard system installation. Package isolation is handled by `renv` in the next step, so there is no risk of conflicting with packages used by other R projects on the same machine.
+
+#### Step 2 — Clone and set up
+
+```bash
+git clone https://github.com/<your-account>/AutoXP3.git
+cd AutoXP3/myapp
+Rscript setup.R
+```
+
+`setup.R` uses [**renv**](https://rstudio.github.io/renv/) to install `shiny`, `readxl`, and `writexl` into a project-local library (`myapp/renv/library/`) that is completely separate from any other R packages on your system. Run it once per machine.
+
+#### Step 3 — Start the app
+
+```bash
+Rscript -e "shiny::runApp('.')"
+```
+
+> **Note**: `renv/library/` is excluded from git. Commit `renv.lock` after the first run so the exact package versions are recorded in the repository.
 
 ---
 
@@ -365,4 +424,54 @@ When results from the next round of experiments are available, append new rows t
 
 ---
 
+---
+
+## 8. Reproducing Results Without the App
+
+`REPRODUCTION_PROMPT.md` is a machine-readable specification that allows any AI assistant (or developer) to reproduce AutoXP3's full analysis pipeline — from an Excel file all the way to a **Save Result**-format `.xlsx` output — **without launching the Shiny app**.
+
+### 8.1 What It Contains
+
+The document precisely specifies every step of the computation in terms of the R functions in `myapp/R/`:
+
+| Section | Content |
+|---|---|
+| §0 Prerequisites | Default hyperparameters, assumed file structure, `set.seed(1)` rule |
+| §1 Excel parsing | `parse_purpose()`, 1-D candidate list rules, categorical level extraction |
+| §2 Standardization | `standardize_fit()`, `prior_to_standardized_scale()`, `beta_to_original_scale()` |
+| §3 Bayesian fitting | `fit_semiparam_bayes()` inputs/outputs, kernel composition |
+| §4 Candidate generation | LHS + corner grid (≤ 100 + 2048 pts), derived variables, constraint filtering |
+| §5 Prediction | `predict_semiparam_bayes()` with `var_total = σ² + v_gp + v_beta` |
+| §6 Training-set metrics | R², RMSE, eps var. re-computed from original-scale residuals |
+| §7 UCB & Desirability | `ucb_score()` branching logic, per-Y and geometric-mean desirability |
+| §8 Scope assembly | `make_scope_df()`, deduplication, ordering, `cand1..N` numbering |
+| §9 Excel output | Sheet order, `Fit info` line format (`sprintf` spec), `Optimize` sheet columns |
+| §10 Numerical precision | `round(..., 4)`, `jitter = 1e-8`, timestamp format |
+| §12 Reference output | Expected `Fit info` values for Sample8 for numerical verification |
+| §13 Pitfalls | Common mistakes (prior scale, LHS seed, `var_total`, etc.) |
+
+### 8.2 When to Use It
+
+- You want to process multiple Excel files **in batch** from the command line
+- You want to integrate the optimization logic into your own R or Python workflow
+- You want an AI to generate the Save Result Excel from an uploaded file **without the GUI**
+- You want to verify that an independent implementation matches AutoXP3's numerical output exactly
+
+### 8.3 How to Use It with an AI
+
+1. Open a conversation with an AI assistant that can run R code (e.g., Claude with code execution)
+2. Attach `REPRODUCTION_PROMPT.md` and your input Excel file
+3. Send a prompt like:
+
+   > "Using the R functions specified in REPRODUCTION_PROMPT.md, process the attached Excel file and produce the Save Result output. Use the default hyperparameters from §0."
+
+4. The AI will follow the specification step by step and produce a `.xlsx` with the same `Data`, `Definition`, `Fit info`, and `Optimize` sheets that the app would generate
+
+### 8.4 Numerical Verification
+
+Use `Sample8.xlsx` from the `AutoXP3_samples_split/` folder as a reference. §12 of the prompt lists the exact expected values for the `Fit info` sheet (e.g., intercept = `+21.559403`, R² = `0.9998`). If these match, the implementation is correct.
+
+---
+
 *Semi-parametric Bayesian Regression · Gaussian Process · UCB Acquisition · Bayesian Optimization*
+          
