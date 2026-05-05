@@ -2,6 +2,15 @@
 # Run this once after cloning:
 #   Rscript setup.R
 
+# Check R version
+if (getRversion() < "4.1.0") {
+  stop(
+    "R >= 4.1.0 is required.\n",
+    "Your version: ", getRversion(), "\n",
+    "Please upgrade R before running setup.R"
+  )
+}
+
 message("Installing renv...")
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv", repos = "https://cloud.r-project.org")

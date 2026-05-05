@@ -40,7 +40,14 @@ Open the link below — no installation needed:
 
 R runs entirely in the browser via WebAssembly (Shinylive). 
 
-### Option B — Run locally
+### Option B — Run locally (exe)
+Download exe.zip from the link below：
+
+**https://github.com/long-rh/AutoXP3-shinylive/releases/tag/exe**
+
+Extract the zip and double click AutoXP3.exe to run the app without internet connection.
+
+### Option C — Run locally (R code)
 
 #### Step 1 — Install R (skip if R ≥ 4.1 is already installed)
 
@@ -52,7 +59,7 @@ Download and run the installer for your OS from the official CRAN site:
 | macOS | https://cran.r-project.org/bin/macosx/ |
 | Linux | https://cran.r-project.org/bin/linux/ |
 
-This is a standard system installation. Package isolation is handled by `renv` in the next step, so there is no risk of conflicting with packages used by other R projects on the same machine.
+This is a standard system installation. Package isolation is handled by `renv` in the next step, so there is no risk of conflicting with packages used by other R projects on the same machine.**This might takes time depending on your internet connection.**
 
 #### Step 2 — Clone and set up
 
@@ -68,6 +75,10 @@ Rscript setup.R
 
 ```bash
 Rscript -e "shiny::runApp('.')"
+```
+You can start using the app in your browser by clickling the url below.
+```bash
+Listening on http://127.0.0.x.x
 ```
 
 > **Note**: `renv/library/` is excluded from git. Commit `renv.lock` after the first run so the exact package versions are recorded in the repository.

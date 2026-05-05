@@ -40,7 +40,14 @@
 
 WebAssembly（Shinylive）によりブラウザ内で R が動作します。
 
-### B — ローカルで動かす
+### B — ローカルで動かす (exeファイル)
+以下のリンクをからexe.zipをインストール：
+
+**https://github.com/long-rh/AutoXP3-shinylive/releases/tag/exe**
+
+zipを解凍し、AutoXP3.exeをダブルクリックすると、インターネットなしでアプリを使用できます。
+
+### C — ローカルで動かす (Rコード)
 
 #### ステップ 1 — R をインストールする（R ≥ 4.1 が既にある場合はスキップ）
 
@@ -61,8 +68,11 @@ git clone https://github.com/long-rh/AutoXP3-shinylive
 cd AutoXP3-shinylive/myapp
 Rscript setup.R
 ```
-
-`setup.R` は [**renv**](https://rstudio.github.io/renv/) を使って `shiny`・`readxl`・`writexl` をプロジェクト専用ライブラリ（`myapp/renv/library/`）にインストールします。システムの他の R パッケージとは完全に分離されます。マシンごとに1回だけ実行してください。
+以下のリンクをクリックすると、ブラウザでアプリを使用できます。
+```bash
+Listening on http://127.0.0.x.x
+```
+`setup.R` は [**renv**](https://rstudio.github.io/renv/) を使って `shiny`・`readxl`・`writexl` をプロジェクト専用ライブラリ（`myapp/renv/library/`）にインストールします。システムの他の R パッケージとは完全に分離されます。マシンごとに1回だけ実行してください。**回線速度によっては、ライブラリのインストールに時間がかかる場合があります。**
 
 #### ステップ 3 — アプリを起動する
 
