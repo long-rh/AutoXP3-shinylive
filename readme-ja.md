@@ -38,7 +38,7 @@
 
 **https://long-rh.github.io/AutoXP3-shinylive/**
 
-WebAssembly（[Shinylive](https://shiny.posit.co/py/docs/shinylive.html)）によりブラウザ内で R が動作します。
+WebAssembly（Shinylive）によりブラウザ内で R が動作します。ソース：[github.com/long-rh/AutoXP3-shinylive](https://github.com/long-rh/AutoXP3-shinylive)
 
 ### B — ローカルで動かす
 

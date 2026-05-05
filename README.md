@@ -38,7 +38,7 @@ Open the link below — no installation needed:
 
 **https://long-rh.github.io/AutoXP3-shinylive/**
 
-R runs entirely in the browser via WebAssembly ([Shinylive](https://shiny.posit.co/py/docs/shinylive.html)).
+R runs entirely in the browser via WebAssembly (Shinylive). Source: [github.com/long-rh/AutoXP3-shinylive](https://github.com/long-rh/AutoXP3-shinylive)
 
 ### Option B — Run locally
 
