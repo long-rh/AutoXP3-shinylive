@@ -1,6 +1,12 @@
 exe/
 exe.zip
 
+# R session files
+.RData
+.Rhistory
+**/.RData
+**/.Rhistory
+
 # renv — library binaries are local; only the lockfile is committed
 myapp/renv/library/
 myapp/renv/staging/

@@ -8,18 +8,18 @@
 
 - [リポジトリ構成](#リポジトリ構成)
 - [インストール](#インストール)
-1. [AutoXP3 とは](#1-autoxp3-とは)
-2. [Excel テンプレートの準備](#2-excel-テンプレートの準備)
-3. [データのアップロード（1. Data タブ）](#3-データのアップロード1-data-タブ)
-4. [モデルのフィット（2. Model タブ）](#4-モデルのフィット2-model-タブ)
-5. [予測の可視化（3. Analyze タブ）](#5-予測の可視化3-analyze-タブ)
-6. [次の実験点の提案（4. Optimize タブ）](#6-次の実験点の提案4-optimize-タブ)
-7. [結果の保存](#7-結果の保存)
-8. [アプリなしで結果を再現する](#8-アプリなしで結果を再現する)
+- [1. AutoXP3 とは](#1-autoxp3-とは)
+- [2. Excel テンプレートの準備](#2-excel-テンプレートの準備)
+- [3. データのアップロード（1. Data タブ）](#3-データのアップロード1-data-タブ)
+- [4. モデルのフィット（2. Model タブ）](#4-モデルのフィット2-model-タブ)
+- [5. 予測の可視化（3. Analyze タブ）](#5-予測の可視化3-analyze-タブ)
+- [6. 次の実験点の提案（4. Optimize タブ）](#6-次の実験点の提案4-optimize-タブ)
+- [7. 結果の保存](#7-結果の保存)
+- [8. アプリなしで結果を再現する](#8-アプリなしで結果を再現する)
 
 ---
 
-## 主なファイル
+## リポジトリ構成
 
 | パス | 内容 |
 |---|---|
@@ -27,7 +27,6 @@
 | `myapp/R/` | セミパラメトリック・ベイズ回帰本体（GP カーネル・UCB・標準化・バリデーション） |
 | `REPRODUCTION_PROMPT.md` | アプリなしで解析パイプライン全体を再現するための AI 用プロンプト |
 | `readme-ja.md` | このファイル — 日本語マニュアル |
-| `template.xlsx` | Excelテンプレート |
 
 ---
 
@@ -418,7 +417,7 @@ Constraints シートに制約式が記載されている場合、候補グリ�
 |---|---|
 | Data | 元の実験データ（変更なし） |
 | Definition | 元の変数定義（変更なし） |
-| Optimize | 「Suggest next experiments」で生成された候補リスト（Rank in scope 付き） |
+| Optimize | 「Suggest next experiments」で生成された候補リスト（Rank 付き） |
 
 次のラウンドの実験結果が得られたら、このファイルの Data シートに新しい行を追記して再アップロードすることで、繰り返し最適化を継続できます。
 
@@ -471,5 +470,4 @@ Constraints シートに制約式が記載されている場合、候補グリ�
 
 ---
 
-*Semi-parametric Bayesian Regression · Gaussian Process · UCB Acquisition · Bayesian Optimization*
-   
+*Semi-parametric Bayesian Regression · Gaussian Process · UC
