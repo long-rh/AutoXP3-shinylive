@@ -58,7 +58,7 @@ WebAssembly（Shinylive）によりブラウザ内で R が動作します。
 
 ```bash
 git clone https://github.com/long-rh/AutoXP3-shinylive
-cd AutoXP3/myapp
+cd AutoXP3-shinylive/myapp
 Rscript setup.R
 ```
 

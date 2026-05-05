@@ -58,7 +58,7 @@ This is a standard system installation. Package isolation is handled by `renv` i
 
 ```bash
 git clone https://github.com/long-rh/AutoXP3-shinylive
-cd AutoXP3/myapp
+cd AutoXP3-shinylive/myapp
 Rscript setup.R
 ```
 
