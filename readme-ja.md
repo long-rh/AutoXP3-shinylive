@@ -6,7 +6,7 @@
 
 ## 目次
 
-- [リポジトリ構成](#リポジトリ構成)
+- [主なファイル](#主なファイル)
 - [インストール](#インストール)
 - [1. AutoXP3 とは](#1-autoxp3-とは)
 - [2. Excel テンプレートの準備](#2-excel-テンプレートの準備)
@@ -19,7 +19,7 @@
 
 ---
 
-## リポジトリ構成
+## 主なファイル
 
 | パス | 内容 |
 |---|---|
@@ -38,7 +38,7 @@
 
 **https://long-rh.github.io/AutoXP3-shinylive/**
 
-WebAssembly（Shinylive）によりブラウザ内で R が動作します。ソース：[github.com/long-rh/AutoXP3-shinylive](https://github.com/long-rh/AutoXP3-shinylive)
+WebAssembly（Shinylive）によりブラウザ内で R が動作します。
 
 ### B — ローカルで動かす
 
@@ -57,7 +57,7 @@ WebAssembly（Shinylive）によりブラウザ内で R が動作します。ソ
 #### ステップ 2 — クローンとセットアップ
 
 ```bash
-git clone https://github.com/<your-account>/AutoXP3.git
+git clone https://github.com/long-rh/AutoXP3-shinylive
 cd AutoXP3/myapp
 Rscript setup.R
 ```

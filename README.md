@@ -6,7 +6,7 @@
 
 ## Table of Contents
 
-- [Repository Structure](#repository-structure)
+- [Core Files](#core-files)
 - [Installation](#installation)
 - [1. What is AutoXP3?](#1-what-is-autoxp3)
 - [2. Preparing the Excel Template](#2-preparing-the-excel-template)
@@ -19,7 +19,7 @@
 
 ---
 
-## Repository Structure
+## Core Files
 
 | Path | Description |
 |---|---|
@@ -38,7 +38,7 @@ Open the link below — no installation needed:
 
 **https://long-rh.github.io/AutoXP3-shinylive/**
 
-R runs entirely in the browser via WebAssembly (Shinylive). Source: [github.com/long-rh/AutoXP3-shinylive](https://github.com/long-rh/AutoXP3-shinylive)
+R runs entirely in the browser via WebAssembly (Shinylive). 
 
 ### Option B — Run locally
 
@@ -57,7 +57,7 @@ This is a standard system installation. Package isolation is handled by `renv` i
 #### Step 2 — Clone and set up
 
 ```bash
-git clone https://github.com/<your-account>/AutoXP3.git
+git clone https://github.com/long-rh/AutoXP3-shinylive
 cd AutoXP3/myapp
 Rscript setup.R
 ```
