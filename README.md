@@ -79,8 +79,8 @@ Listening on http://127.0.0.x.x
 
 
 
-### C — Run locally (exe for windows)
-Download from the link below:
+### Option C — Run locally (exe for windows)
+Download setup.exe from the link below:
 
 **https://sturgeon.booth.pm/items/8316106**
 
