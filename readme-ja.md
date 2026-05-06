@@ -76,6 +76,13 @@ Rscript -e "shiny::runApp('.')"
 
 > **注**: `renv/library/` は `.gitignore` で除外されています。初回実行後に `renv.lock` を commit することで、パッケージのバージョンがリポジトリに記録されます。
 
+
+### C — ローカルで動かす (exe for windows)
+以下のリンクから購入いただけます：
+
+**https://sturgeon.booth.pm/items/8316106**
+
+
 ---
 
 ## 1. AutoXP3 とは

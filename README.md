@@ -77,6 +77,13 @@ Listening on http://127.0.0.x.x
 
 > **Note**: `renv/library/` is excluded from git. Commit `renv.lock` after the first run so the exact package versions are recorded in the repository.
 
+
+
+### C — Run locally (exe for windows)
+Download from the link below:
+
+**https://sturgeon.booth.pm/items/8316106**
+
 ---
 
 ## 1. What is AutoXP3?
