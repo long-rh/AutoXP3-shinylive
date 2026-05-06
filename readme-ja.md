@@ -39,15 +39,9 @@
 **https://long-rh.github.io/AutoXP3-shinylive/**
 
 WebAssembly（Shinylive）によりブラウザ内で R が動作します。
+アプリを読み込む際はインターネットが必要ですが、アプリ内の計算処理は、サーバーに送信されません。
 
-### B — ローカルで動かす (exeファイル)
-以下のリンクをからexe.zipをインストール：
-
-**https://github.com/long-rh/AutoXP3-shinylive/releases/tag/exe**
-
-zipを解凍し、AutoXP3.exeをダブルクリックすると、インターネットなしでアプリを使用できます。
-
-### C — ローカルで動かす (Rコード)
+### B — ローカルで動かす (Bコード)
 
 #### ステップ 1 — R をインストールする（R ≥ 4.1 が既にある場合はスキップ）
 

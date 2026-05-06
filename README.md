@@ -39,15 +39,9 @@ Open the link below — no installation needed:
 **https://long-rh.github.io/AutoXP3-shinylive/**
 
 R runs entirely in the browser via WebAssembly (Shinylive). 
+Internet connection is only required when accessing the url. 
 
-### Option B — Run locally (exe)
-Download exe.zip from the link below：
-
-**https://github.com/long-rh/AutoXP3-shinylive/releases/tag/exe**
-
-Extract the zip and double click AutoXP3.exe to run the app without internet connection.
-
-### Option C — Run locally (R code)
+### Option B — Run locally (R code)
 
 #### Step 1 — Install R (skip if R ≥ 4.1 is already installed)
 
