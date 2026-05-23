@@ -282,7 +282,9 @@ shinyUI(
           uiOutput("ui_col_select"),
           uiOutput("ui_error"),
           uiOutput("ui_y_view"),
-          div(br()),
+          checkboxInput("use_quadratic",
+            "Auto 2nd-order terms",
+            value = FALSE),
           uiOutput("ui_btn_fit"),
           div(br()),
           uiOutput("ui_btn_save_result")
@@ -395,10 +397,10 @@ shinyUI(
             br(),
             fluidRow(
               column(12,
-                     div(class = "cardx",
-                         div(class = "box-title", "Fitting result information"),
-                         verbatimTextOutput("fit_info_analyze")
-                     )
+                div(class = "cardx",
+                  div(class = "box-title", "Fitting result information"),
+                  verbatimTextOutput("fit_info_analyze")
+                )
               )
             )
           ),

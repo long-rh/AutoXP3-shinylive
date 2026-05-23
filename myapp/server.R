@@ -41,6 +41,7 @@ shinyServer(function(input, output, session) {
     upload_valid    = FALSE,
     last_fit_hp2 = NULL,
     last_fit_hp3 = NULL,
+    last_fit_use_quadratic = NULL
     #last_fit_use_yj = NULL,
     #last_fit_yj_lambda = NULL
   )
@@ -269,25 +270,35 @@ shinyServer(function(input, output, session) {
     if (!is.null(model_params$sigma2)) updateNumericInput(session, "hp3", value = model_params$sigma2)
 
     # Feature 2: 派生変数の列名から式を自動検出
-    # 対応パターン: X, X*X, X*X'(交互作用), 1/X, exp(X), exp(-X), log(X)
+    # Rule: 以下をすべて満たす列名を有効な派生変数式として受け入れる
+    #   1. 安全文字のみ（英数字・_・.・*/+^()-・空白）
+    #   2. 定義されたX変数を少なくとも1つ含む（単語境界マッチ）
+    #   3. Rとして parse() できる
+    #   4. X^X 記法（例: X1^X1）は X^2 にリマップ（特別処理）
+    # これにより exp(-X1/10), exp(10*X1), log(X1/100) なども自動対応
     detect_formula_from_name <- function(col_name, x_vars) {
       if (length(x_vars) == 0) return(NULL)
-      xp <- paste0("(", paste(x_vars, collapse = "|"), ")")
-      patterns <- c(
-        paste0("^", xp, "$"),
-        paste0("^", xp, "\\s*\\*\\s*", xp, "$"),
-        paste0("^1\\s*/\\s*", xp, "$"),
-        paste0("^exp\\(", xp, "\\)$"),
-        paste0("^exp\\(-", xp, "\\)$"),
-        paste0("^log\\(", xp, "\\)$"),
-        paste0("^log10\\(", xp, "\\)$"),
-        paste0("^sqrt\\(", xp, "\\)$"),
-        paste0("^sin\\(", xp, "\\)$"),
-        paste0("^cos\\(", xp, "\\)$")
-      )
-      if (any(sapply(patterns, function(p) grepl(p, trimws(col_name))))) {
-        return(trimws(col_name))   # 列名がそのまま R 式として使える
+      nm <- trimws(col_name)
+
+      # X^X → X^2 の特殊リマップ（Rでは X^X が X² を意味しないため）
+      for (xn in x_vars) {
+        if (grepl(paste0("^", xn, "\\s*\\^\\s*", xn, "$"), nm))
+          return(paste0(xn, "^2"))
       }
+
+      # Safety: 数式に使われない文字を含む列名は除外
+      if (!grepl("^[A-Za-z0-9_.*/+^()\\s-]+$", nm)) return(NULL)
+
+      # 定義済みX変数を少なくとも1つ含む（単語境界マッチ）
+      has_xvar <- any(vapply(x_vars, function(xn) {
+        grepl(paste0("\\b", xn, "\\b"), nm)
+      }, logical(1)))
+      if (!has_xvar) return(NULL)
+
+      # Rとして有効な式かどうか確認
+      ok <- tryCatch({ parse(text = nm); TRUE }, error = function(e) FALSE)
+      if (ok) return(nm)
+
       NULL
     }
 
@@ -314,13 +325,14 @@ shinyServer(function(input, output, session) {
     rv$optimize_status_msg <- "No optimize results with the current models. Please run Suggest next experiments."
     # upload直後に全Yを自動fit
     for (yn in rv$Y_names) {
-      ok <- tryCatch({ do_fit_one(yn); TRUE }, error = function(e) { rv$error_msg <- conditionMessage(e); FALSE })
+      ok <- tryCatch({ do_fit_one_with_quad(yn); TRUE }, error = function(e) { rv$error_msg <- conditionMessage(e); FALSE })
       if (!ok) return(NULL)
     }
     rv$upload_valid <- TRUE
     rv$fit <- rv$fits[[rv$y_view]]
-    rv$last_fit_hp2       <- input$hp2
-    rv$last_fit_hp3       <- input$hp3
+    rv$last_fit_hp2            <- input$hp2
+    rv$last_fit_hp3            <- input$hp3
+    rv$last_fit_use_quadratic  <- isTRUE(input$use_quadratic)
     #rv$last_fit_use_yj    <- isTRUE(input$use_yeojohnson)
     #rv$last_fit_yj_lambda <- if (isTRUE(input$use_yeojohnson)) input$yj_lambda else NA_real_
   })
@@ -399,11 +411,21 @@ shinyServer(function(input, output, session) {
       tags$div(paste0("  ", yn, ": ", purp))
     })
 
+    # Collect all unique auto-selected 2nd-order names across all fits
+    all_auto_quad <- unique(unlist(lapply(rv$Y_names, function(yn) {
+      fw <- rv$fits[[yn]]
+      if (is.null(fw)) character(0) else fw$auto_quad_names
+    })))
+
+    # Merge derived_cols + auto_quad into one "Derived:" line
+    all_derived <- unique(c(rv$derived_cols, all_auto_quad))
+    drv_txt_merged <- if (length(all_derived) > 0) paste(all_derived, collapse = ", ") else "none"
+
     div(
       tags$div("Input parameter:"),
       tags$div(paste0("Continuous: ", x_cont_txt)),
       tags$div(paste0("Categorical: ", if (nchar(x_cat_txt) > 0) x_cat_txt else "none")),
-      tags$div(paste0("Derived: ", drv_txt)),
+      tags$div(paste0("Derived: ", drv_txt_merged)),
       tags$br(),
       tags$div("Output (Y) / Purpose:"),
       do.call(tagList, y_purpose_lines)
@@ -415,7 +437,29 @@ shinyServer(function(input, output, session) {
   # ══════════════════════════════════════════════════════════
   output$tbl_uploaded_data <- renderTable({
     req(rv$data)
-    rv$data
+    df <- rv$data
+    # Append auto-selected 2nd-order columns (from any fitted Y)
+    all_auto_quad_info <- list()
+    for (yn in rv$Y_names) {
+      fw <- rv$fits[[yn]]
+      if (is.null(fw)) next
+      for (nm in fw$auto_quad_names) {
+        if (!(nm %in% names(all_auto_quad_info)) && !(nm %in% names(df))) {
+          fstr <- fw$auto_quad_formulas[[nm]]
+          if (!is.null(fstr) && nzchar(trimws(fstr)))
+            all_auto_quad_info[[nm]] <- fstr
+        }
+      }
+    }
+    if (length(all_auto_quad_info) > 0) {
+      base_df <- as.list(df)
+      for (nm in names(all_auto_quad_info)) {
+        tryCatch({
+          df[[nm]] <- eval(parse(text = all_auto_quad_info[[nm]]), envir = base_df)
+        }, error = function(e) {})
+      }
+    }
+    df
   }, striped = FALSE, bordered = TRUE, hover = TRUE)
 
   output$tbl_definition <- renderTable({
@@ -445,7 +489,8 @@ shinyServer(function(input, output, session) {
     # cur_yj_lam <- if (cur_use_yj) input$yj_lambda else NA_real_
     
     !isTRUE(all.equal(input$hp2, rv$last_fit_hp2)) ||
-      !isTRUE(all.equal(input$hp3, rv$last_fit_hp3))
+      !isTRUE(all.equal(input$hp3, rv$last_fit_hp3)) ||
+      !identical(isTRUE(input$use_quadratic), isTRUE(rv$last_fit_use_quadratic))
       # || !identical(cur_use_yj, rv$last_fit_use_yj) ||
       # || !isTRUE(all.equal(cur_yj_lam, rv$last_fit_yj_lambda))
   })
@@ -463,7 +508,7 @@ shinyServer(function(input, output, session) {
     fit_ok && err_ok
   })
 
-  do_fit_one <- function(y_name) {
+  do_fit_one <- function(y_name, extra_cont_df = NULL, extra_quad_formulas = list()) {
     req(rv$data, rv$X_names, rv$def)
 
     dat <- rv$data
@@ -486,9 +531,17 @@ shinyServer(function(input, output, session) {
     # y <- fwd_y(yorg, lambda = lambda)
     y <- yorg
 
-    # Feature 2: 派生変数を含む連続変数行列
-    all_cont <- c(X_cont, rv$derived_cols)
-    Xraw_cont <- as.matrix(dat[, all_cont, drop = FALSE])
+    # Feature 2: 派生変数を含む連続変数行列（+ auto 2nd-order terms）
+    extra_names <- if (!is.null(extra_cont_df)) names(extra_cont_df) else character(0)
+    all_cont    <- c(X_cont, rv$derived_cols, extra_names)
+
+    Xraw_base <- as.matrix(dat[, c(X_cont, rv$derived_cols), drop = FALSE])
+    if (!is.null(extra_cont_df)) {
+      Xraw_cont <- cbind(Xraw_base, as.matrix(extra_cont_df))
+      colnames(Xraw_cont) <- all_cont
+    } else {
+      Xraw_cont <- Xraw_base
+    }
     storage.mode(Xraw_cont) <- "double"
 
     Z_cat <- NULL
@@ -585,12 +638,108 @@ shinyServer(function(input, output, session) {
       y_pred    = y_pred,
       var_pred  = var_pred,
       y_name    = y_name,
-      mu_beta_orig = mu_beta_orig,
-      mu0_orig     = mu0,
-      sig0_orig    = sig0,
-      mu0_fit      = mu0_fit,
-      sig0_fit     = sig0_fit
+      mu_beta_orig       = mu_beta_orig,
+      mu0_orig           = mu0,
+      sig0_orig          = sig0,
+      mu0_fit            = mu0_fit,
+      sig0_fit           = sig0_fit,
+      auto_quad_names    = extra_names,        # auto-selected 2nd-order term names
+      auto_quad_formulas = extra_quad_formulas # corresponding R formula strings
     )
+  }
+
+  # ══════════════════════════════════════════════════════════
+  # Auto 2nd-order term selection
+  # ══════════════════════════════════════════════════════════
+  select_quadratic_candidates <- function(fw1, dat, X_cont_base) {
+    EFFECT_THRESHOLD <- 0.15   # |β_rel| >= 20% of max|β| → important
+    COR_THRESHOLD    <- 0.15   # |cor with residual| >= 0.15 → selected
+    MAX_TERMS        <- 3L     # at most 3 auto terms added
+
+    # β for base X_cont only (index into all_cont, then +1 for intercept offset)
+    beta_orig <- fw1$mu_beta_orig
+    x_indices <- match(X_cont_base, fw1$all_cont)
+    valid     <- !is.na(x_indices)
+    if (sum(valid) == 0) return(list(df = NULL, formulas = list()))
+
+    beta_x <- beta_orig[x_indices[valid] + 1L]
+    x_vars <- X_cont_base[valid]
+
+    # Relative effect size
+    eff     <- abs(beta_x)
+    max_eff <- max(eff, na.rm = TRUE)
+    if (!is.finite(max_eff) || max_eff <= 0) return(list(df = NULL, formulas = list()))
+
+    important <- x_vars[!is.na(eff / max_eff) & (eff / max_eff) >= EFFECT_THRESHOLD]
+    if (length(important) == 0) return(list(df = NULL, formulas = list()))
+
+    # Generate candidate 2nd-order terms
+    candidates <- list()
+    formulas   <- list()
+
+    # Names already present as derived cols — skip to avoid duplicates
+    existing_names <- rv$derived_cols
+
+    # Quadratic: Xi^2
+    for (xn in important) {
+      nm <- paste0(xn, "^2")
+      if (nm %in% existing_names) next
+      candidates[[nm]] <- dat[[xn]]^2
+      formulas[[nm]]   <- paste0(xn, "^2")
+    }
+
+    # Interactions (strong heredity: both vars in `important`)
+    if (length(important) >= 2) {
+      for (pair in combn(important, 2, simplify = FALSE)) {
+        nm <- paste0(pair[1], "*", pair[2])
+        if (nm %in% existing_names) next
+        candidates[[nm]] <- dat[[pair[1]]] * dat[[pair[2]]]
+        formulas[[nm]]   <- paste0(pair[1], " * ", pair[2])
+      }
+    }
+
+    if (length(candidates) == 0) return(list(df = NULL, formulas = list()))
+
+    # Correlation with 1st-order residuals
+    resid1 <- fw1$yorg - fw1$y_pred
+    cors <- vapply(candidates, function(v) {
+      ok <- is.finite(v) & is.finite(resid1)
+      if (sum(ok) < 3) return(0)
+      abs(cor(v[ok], resid1[ok]))
+    }, numeric(1))
+
+    # Filter by threshold, sort by |cor| desc, cap at MAX_TERMS
+    selected <- names(cors)[cors >= COR_THRESHOLD]
+    if (length(selected) == 0) return(list(df = NULL, formulas = list()))
+
+    selected <- names(sort(cors[selected], decreasing = TRUE))
+    selected <- head(selected, MAX_TERMS)
+
+    list(df = as.data.frame(candidates[selected], check.names = FALSE), formulas = formulas[selected])
+  }
+
+  # Wrapper: 1st-order fit → auto 2nd-order selection → refit
+  do_fit_one_with_quad <- function(y_name) {
+    # Step 1: 1st-order fit (no extra terms)
+    do_fit_one(y_name)
+
+    # Skip if checkbox is not checked
+    if (!isTRUE(input$use_quadratic)) return(invisible())
+
+    fw1 <- rv$fits[[y_name]]
+    if (is.null(fw1)) return(invisible())
+
+    X_cont_base <- fw1$X_cont   # base X only; derived_cols excluded from heredity
+    if (length(X_cont_base) == 0) return(invisible())
+
+    # Step 2: Select 2nd-order candidates
+    result <- select_quadratic_candidates(fw1, rv$data, X_cont_base)
+    if (is.null(result$df) || ncol(result$df) == 0) return(invisible())
+
+    # Step 3: Refit with selected 2nd-order terms
+    do_fit_one(y_name,
+               extra_cont_df       = result$df,
+               extra_quad_formulas = result$formulas)
   }
 
   # Fit model ボタン: 全Yをフィット
@@ -602,11 +751,12 @@ shinyServer(function(input, output, session) {
     rv$fits <- list()
     rv$cand <- NULL
     rv$optimize_status_msg <- "No optimize results with the current models. Please run Suggest next experiments."
-    for (yn in rv$Y_names) do_fit_one(yn)
+    for (yn in rv$Y_names) do_fit_one_with_quad(yn)
     rv$y_view <- rv$Y_names[1]
     rv$fit <- rv$fits[[rv$y_view]]
-    rv$last_fit_hp2       <- input$hp2
-    rv$last_fit_hp3       <- input$hp3
+    rv$last_fit_hp2            <- input$hp2
+    rv$last_fit_hp3            <- input$hp3
+    rv$last_fit_use_quadratic  <- isTRUE(input$use_quadratic)
     #rv$last_fit_use_yj    <- isTRUE(input$use_yeojohnson)
     #rv$last_fit_yj_lambda <- if (isTRUE(input$use_yeojohnson)) input$yj_lambda else NA_real_
   })
@@ -618,14 +768,15 @@ shinyServer(function(input, output, session) {
     
     req(rv$y_view)
     
-    do_fit_one(rv$y_view)
+    do_fit_one_with_quad(rv$y_view)
     rv$fit <- rv$fits[[rv$y_view]]
-    
-    rv$last_fit_hp2       <- input$hp2
-    rv$last_fit_hp3       <- input$hp3
+
+    rv$last_fit_hp2            <- input$hp2
+    rv$last_fit_hp3            <- input$hp3
+    rv$last_fit_use_quadratic  <- isTRUE(input$use_quadratic)
     #rv$last_fit_use_yj    <- isTRUE(input$use_yeojohnson)
     #rv$last_fit_yj_lambda <- if (isTRUE(input$use_yeojohnson)) input$yj_lambda else NA_real_
-    
+
     rv$cand <- NULL
     rv$optimize_status_msg <- paste0(
       "Optimize results were cleared because the model for ",
@@ -706,6 +857,20 @@ shinyServer(function(input, output, session) {
       seq_len(p), paste0("(", x_labels, ")"), beta_disp
     )
     
+    # Auto 2nd-order terms \u30bb\u30af\u30b7\u30e7\u30f3
+    quad_section <- if (!is.null(fw$auto_quad_names) && length(fw$auto_quad_names) > 0) {
+      quad_disp <- sprintf(
+        "  %-20s <- %s",
+        fw$auto_quad_names,
+        vapply(fw$auto_quad_names,
+               function(nm) fw$auto_quad_formulas[[nm]] %||% nm,
+               character(1))
+      )
+      c("", "[Auto-selected 2nd-order terms]", quad_disp)
+    } else {
+      character(0)
+    }
+
     c(
       "Semi-parametric Bayesian regression",
       linear_eq,
@@ -713,6 +878,7 @@ shinyServer(function(input, output, session) {
       "",
       "[Posterior beta | y] (original scale)",
       beta_lines,
+      quad_section,
       "",
       "[Hyperparameters]",
       sprintf("theta1 (RBF scale)       = %.4f", fit$sf2),
@@ -825,6 +991,32 @@ shinyServer(function(input, output, session) {
                  error = function(e) data.frame())
       })
       names(sheets_list) <- all_sheets
+
+      # ── Augment Data sheet with auto-selected 2nd-order columns ──
+      if ("Data" %in% names(sheets_list)) {
+        data_df <- sheets_list[["Data"]]
+        all_auto_quad_info <- list()
+        for (yn in names(rv$fits)) {
+          fw <- rv$fits[[yn]]
+          if (is.null(fw)) next
+          for (nm in fw$auto_quad_names) {
+            if (!(nm %in% names(all_auto_quad_info)) && !(nm %in% names(data_df))) {
+              fstr <- fw$auto_quad_formulas[[nm]]
+              if (!is.null(fstr) && nzchar(trimws(fstr)))
+                all_auto_quad_info[[nm]] <- fstr
+            }
+          }
+        }
+        if (length(all_auto_quad_info) > 0) {
+          base_df <- as.list(data_df)
+          for (nm in names(all_auto_quad_info)) {
+            tryCatch({
+              data_df[[nm]] <- eval(parse(text = all_auto_quad_info[[nm]]), envir = base_df)
+            }, error = function(e) {})
+          }
+          sheets_list[["Data"]] <- data_df
+        }
+      }
       
       # ── Fit info シート: fitting model information を全Y分保存 ──
       y_names <- names(rv$fits)
@@ -867,7 +1059,7 @@ shinyServer(function(input, output, session) {
     req(rv$fit)
     cat(paste(build_fit_info_lines(rv$fit), collapse = "\n"))
   })
-  
+
   output$ui_x12_select <- renderUI({
     req(rv$X_names)
     fluidRow(
@@ -975,6 +1167,17 @@ shinyServer(function(input, output, session) {
         Xcont_new[, nm] <- base_df[[nm]]
       }
     }
+
+    # Auto 2nd-order terms（formula文字列から計算）
+    for (nm in rv$fit$auto_quad_names) {
+      formula_str <- rv$fit$auto_quad_formulas[[nm]]
+      if (!is.null(formula_str) && nchar(trimws(formula_str)) > 0) {
+        tryCatch({
+          Xcont_new[, nm] <- eval(parse(text = formula_str), envir = as.data.frame(base_df))
+        }, error = function(e) { Xcont_new[, nm] <- NA_real_ })
+      }
+    }
+
     Xcont_new
   }
 
@@ -1163,10 +1366,7 @@ shinyServer(function(input, output, session) {
     req(length(rv$fits) > 0)
     fitted_label <- paste(names(rv$fits), collapse = ", ")
     div(
-      actionButton("btn_suggest", "Suggest next experiments", class = "btn-wide btn-primary"),
-      div(class = "note", style = "margin-top:6px;",
-          paste0("Fitted Y: ", fitted_label,
-                 " | Optimize Yn: top 2 per Y (κ=0) | Optimize All: top 3 by desirability D (geometric mean, κ=0) | Explore Yn: top 2 per Y (κ=2)"))
+      actionButton("btn_suggest", "Suggest next experiments", class = "btn-wide btn-primary")
     )
   })
 
@@ -1271,30 +1471,52 @@ shinyServer(function(input, output, session) {
       if (nrow(grid_df) == 0) { rv$error_msg <- "All candidates were filtered out by constraints."; return(NULL) }
     }
 
-    # 連続/カテゴリ分割
-    X_cont_all <- c(def2$Parameter[def2$Type == "continuous" & def2$Parameter %in% Xnames], rv$derived_cols)
-    X_cont_all <- X_cont_all[X_cont_all %in% names(grid_df)]
+    # カテゴリ変数の準備（全Y共通）
     X_cat_base <- def2$Parameter[def2$Type == "categorical" & def2$Parameter %in% Xnames]
-
-    Xnew_cont <- if (length(X_cont_all) > 0) {
-      m <- as.matrix(grid_df[, X_cont_all, drop = FALSE]); storage.mode(m) <- "double"; m
-    } else matrix(numeric(0), nrow = nrow(grid_df), ncol = 0)
-
-    Z_cat_new <- NULL
+    Z_cat_new  <- NULL
     if (length(X_cat_base) > 0) {
       Z_cat_new <- as.data.frame(grid_df[, X_cat_base, drop = FALSE])
       for (nm in X_cat_base) Z_cat_new[[nm]] <- as.character(Z_cat_new[[nm]])
     }
 
-    Xnew <- cbind(1, Xnew_cont)
-    Znew <- Xnew_cont
+    # Auto 2nd-order terms を grid_df に追加（各Yのauto_quad_formulasから計算）
+    already_added <- character(0)
+    for (yn in fitted_Ys) {
+      fw <- rv$fits[[yn]]
+      for (nm in fw$auto_quad_names) {
+        if (nm %in% already_added || nm %in% names(grid_df)) {
+          already_added <- c(already_added, nm)
+          next
+        }
+        formula_str <- fw$auto_quad_formulas[[nm]]
+        if (!is.null(formula_str)) {
+          tryCatch({
+            grid_df[[nm]] <- eval(parse(text = formula_str), envir = grid_df)
+          }, error = function(e) { grid_df[[nm]] <- NA_real_ })
+        }
+        already_added <- c(already_added, nm)
+      }
+    }
 
-    # ── 各 Y について予測 ────────────────────────────────
+    # ── 各 Y について Y 固有の all_cont で予測 ───────────
     all_mu <- list()
     all_sd <- list()
     for (yn in fitted_Ys) {
-      fw <- rv$fits[[yn]]
-      ns <- tryCatch(standardize_apply(Xnew, Znew, fw$std), error = function(e) NULL)
+      fw         <- rv$fits[[yn]]
+      y_all_cont <- fw$all_cont
+
+      # grid_df に不足している列を NA で補完
+      for (nm in y_all_cont) {
+        if (!nm %in% names(grid_df)) grid_df[[nm]] <- NA_real_
+      }
+
+
+      Xcont_y <- as.matrix(grid_df[, y_all_cont, drop = FALSE])
+      storage.mode(Xcont_y) <- "double"
+      Xnew_y <- cbind(1, Xcont_y)
+      Znew_y <- Xcont_y
+
+      ns <- tryCatch(standardize_apply(Xnew_y, Znew_y, fw$std), error = function(e) NULL)
       if (is.null(ns)) next
       pr <- tryCatch(
         predict_semiparam_bayes(fw$fit, Xnew = ns$X, Znew = ns$Z,
@@ -1306,11 +1528,11 @@ shinyServer(function(input, output, session) {
     }
     if (length(all_mu) == 0) { rv$error_msg <- "Prediction failed for all Y."; return(NULL) }
 
-    # ── 満足度関数（Derringer-Suich 簡略版）────────────
+    # ── 満足度関数（Derringer-Suich 簡略版）──────────
     # 各 Y の UCB/LCB スコアを [0,1] に正規化し幾何平均を取る
-    # ── 満足度関数（全Y統合）─────────────────────────────
-    # ── 満足度関数（全Y統合）─────────────────────────────
-    # ── 満足度関数（全Y統合）─────────────────────────────
+    # ── 満足度関数（全Y統合）──────────────────────────────
+    # ── 満足度関数（全Y統合）──────────────────────────────
+    # ── 満足度関数（全Y統合）──────────────────────────────
     compute_D <- function(kappa) {
       d_list <- lapply(names(all_mu), function(yn) {
         mu_k <- all_mu[[yn]]
@@ -1368,36 +1590,122 @@ shinyServer(function(input, output, session) {
     }
 
     result_list <- list()
+    single_y    <- length(all_mu) == 1L
 
-    # ── Per-Y Optimize: 2 candidates each ────────────────
+    # ── Per-Y Optimize ────────────────────────────────────────
+    # Single Y: more candidates (no "Optimize All" to add variety)
+    # Multi Y:  3 candidates each
+    n_top_opt <- if (single_y) 5L else 3L
     for (yn in names(all_mu)) {
       result_list[[paste0("opt_", yn)]] <- make_scope_df(
         scope_label = paste("Optimize", yn),
         desirability = compute_single_y_desirability(yn, 0.0),
-        n_top = 2,
+        n_top = n_top_opt,
         mode_key = "Optimize",
         target_y_key = yn
       )
     }
 
-    # ── Optimize All: desirability geometric mean ─────────
-    result_list[["opt_all"]] <- make_scope_df(
-      scope_label = "Optimize All",
-      desirability = compute_D(0.0),
-      n_top = 3,
-      mode_key = "Optimize",
-      target_y_key = "All"
-    )
+    # ── Optimize All: only when multiple Y ───────────────────
+    if (!single_y) {
+      result_list[["opt_all"]] <- make_scope_df(
+        scope_label = "Optimize All",
+        desirability = compute_D(0.0),
+        n_top = 3,
+        mode_key = "Optimize",
+        target_y_key = "All"
+      )
+    }
 
-    # ── Per-Y Explore: 2 candidates each ─────────────────
+    # ── Per-Y Explore: 3 candidates each ─────────────────────
     for (yn in names(all_mu)) {
       result_list[[paste0("exp_", yn)]] <- make_scope_df(
         scope_label = paste("Explore", yn),
-        desirability = compute_single_y_desirability(yn, 2.0),
-        n_top = 2,
+        desirability = compute_single_y_desirability(yn, 3.0),
+        n_top = 3,
         mode_key = "Explore",
         target_y_key = yn
       )
+    }
+
+    # ── Space Fill ─────────────────────────────────────────────────
+    # Select N_SF candidates that maximise minimum Euclidean distance
+    # to existing training data in the normalised continuous input
+    # space. Uses greedy sequential selection so the chosen points
+    # are also diverse relative to each other.
+    {
+      sf_cont <- def2$Parameter[def2$Type == "continuous" & def2$Parameter %in% Xnames]
+      N_SF    <- 3L
+
+      if (length(sf_cont) > 0 && nrow(rv$data) >= 1L && nrow(grid_df) > N_SF) {
+
+        # Normalise each continuous variable to [0, 1] using Definition min_num / max_num
+        norm_mat <- function(df) {
+          out <- matrix(0.0, nrow(df), length(sf_cont))
+          colnames(out) <- sf_cont
+          for (nm in sf_cont) {
+            di <- def2[def2$Parameter == nm, , drop = FALSE]
+            mn <- di$min_num[1]; mx <- di$max_num[1]
+            v  <- as.numeric(df[[nm]])
+            if (is.finite(mn) && is.finite(mx) && mx > mn)
+              out[, nm] <- pmin(1, pmax(0, (v - mn) / (mx - mn)))
+          }
+          out
+        }
+
+        cand_n  <- norm_mat(grid_df)  # n_cand  × n_cont
+        train_n <- norm_mat(rv$data)  # n_train × n_cont
+        n_dim   <- ncol(cand_n)
+
+        # Mean squared distance per normalised dimension: n_cand × n_train
+        # NOTE: pmax() strips the dim attribute from a matrix, so we clip
+        # negative values in-place to keep sq_dist_mat as a proper matrix.
+        sq_dist_mat <- (
+          outer(rowSums(cand_n^2), rowSums(train_n^2), "+") -
+          2 * tcrossprod(cand_n, train_n)
+        ) / n_dim
+        sq_dist_mat[sq_dist_mat < 0] <- 0
+
+        # Exclude grid indices already chosen as Optimize / Explore candidates
+        cand_keys <- do.call(paste, c(grid_df[, Xnames, drop = FALSE], sep = "\r"))
+        opted_keys <- unique(unlist(lapply(result_list, function(df) {
+          do.call(paste, c(df[, Xnames, drop = FALSE], sep = "\r"))
+        })))
+        exclude_idx <- which(cand_keys %in% opted_keys)
+
+        # Greedy sequential selection:
+        # Step 1 picks the candidate farthest from training data.
+        # Each subsequent step picks the candidate farthest from
+        # training data ∪ already-selected candidates.
+        cur_min_sq <- apply(sq_dist_mat, 1, min)
+        selected   <- integer(0)
+
+        for (k in seq_len(N_SF)) {
+          avail <- setdiff(seq_len(nrow(grid_df)), union(selected, exclude_idx))
+          if (length(avail) == 0) break
+          best  <- avail[which.max(cur_min_sq[avail])]
+          selected <- c(selected, best)
+          if (k < N_SF) {
+            # Update min-distances using the newly chosen point as reference
+            new_sq <- pmax(0,
+              rowSums(cand_n^2) + sum(cand_n[best, ]^2) -
+              2 * as.vector(cand_n %*% cand_n[best, ])
+            ) / n_dim
+            cur_min_sq <- pmin(cur_min_sq, new_sq)
+          }
+        }
+
+        if (length(selected) > 0) {
+          sf_df <- base_df[selected, , drop = FALSE]
+          # Score = normalised min-distance to nearest training point
+          sf_df$Desirability <- sqrt(apply(sq_dist_mat[selected, , drop = FALSE], 1, min))
+          sf_df$.mode_key    <- "Space fill"
+          sf_df$.target_key  <- "All"
+          sf_df$Scope        <- "Space fill"
+          sf_df$RankInScope  <- seq_len(nrow(sf_df))
+          result_list[["sf"]] <- sf_df
+        }
+      }
     }
 
     combined <- do.call(rbind, result_list)
@@ -1409,20 +1717,27 @@ shinyServer(function(input, output, session) {
     )
     combined <- combined[!duplicated(key_in_scope), , drop = FALSE]
 
-    # ソート順: Optimize Y > Optimize All > Explore Y
+    # ソート順: Optimize Y > (Optimize All if multi-Y) > Explore Y > Space fill
     scope_levels <- c(
       paste("Optimize", names(all_mu)),
-      "Optimize All",
-      paste("Explore", names(all_mu))
+      if (!single_y) "Optimize All",
+      paste("Explore", names(all_mu)),
+      "Space fill"
     )
     combined$Scope <- factor(combined$Scope, levels = scope_levels)
-    combined$.mode_key   <- factor(combined$.mode_key,   levels = c("Optimize", "Explore"))
+    combined$.mode_key   <- factor(combined$.mode_key,   levels = c("Optimize", "Explore", "Space fill"))
     combined$.target_key <- factor(combined$.target_key, levels = c(names(all_mu), "All"))
 
     combined <- combined[
       order(combined$.mode_key, combined$.target_key, combined$RankInScope),
       , drop = FALSE
     ]
+
+    # スコープをまたいだ重複除去
+    # ソート済みなので優先度の高いスコープ（Optimize > Explore > Space fill）が先頭に来ており、
+    # !duplicated でそのスコープの候補が残り、低優先度スコープの同一X値候補が削除される。
+    key_global <- do.call(paste, c(combined[, Xnames, drop = FALSE], sep = "\r"))
+    combined <- combined[!duplicated(key_global), , drop = FALSE]
 
     # 内部キー列を削除
     combined$.mode_key   <- NULL

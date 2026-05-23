@@ -283,30 +283,32 @@ validate_excel_upload <- function(path, normalize_sheet_name) {
   #   based on Definition-defined continuous X variables.
   #
   # Examples accepted when X1, X2 are defined as continuous in Definition:
-  #   X1
-  #   X1*X1
-  #   X1*X2
-  #   1/X1
-  #   exp(X1)
-  #   exp(-X1)
-  #   log(X1)
+  #   X1, X1*X2, X1^2, X1^X1, 1/X1
+  #   exp(X1), exp(-X1), exp(-X1/10), exp(10*X1)
+  #   log(X1), log(X1/100), log10(X1/100)
+  #   sqrt(X1/2), sin(X1), cos(X1), X1/100, 10*X1, ...
+  #
+  # Rule: accepted if ALL of the following hold:
+  #   1. Contains only safe characters (alphanumeric, _, ., *, +, /, ^, (, ), -, space)
+  #   2. Contains at least one defined X variable (whole-word match)
+  #   3. Parses as valid R (tryCatch on parse())
+  #   4. X^X notation is remapped to X^2 (handled in server.R; here just accepted)
   detect_formula_from_name <- function(col_name, x_vars) {
     if (length(x_vars) == 0) return(FALSE)
     nm <- trimws(as.character(col_name))
-    xp <- paste0("(", paste(x_vars, collapse = "|"), ")")
-    patterns <- c(
-      paste0("^", xp, "$"),
-      paste0("^", xp, "\\s*\\*\\s*", xp, "$"),
-      paste0("^1\\s*/\\s*", xp, "$"),
-      paste0("^exp\\(", xp, "\\)$"),
-      paste0("^exp\\(-", xp, "\\)$"),
-      paste0("^log\\(", xp, "\\)$"),
-      paste0("^log10\\(", xp, "\\)$"),
-      paste0("^sqrt\\(", xp, "\\)$"),
-      paste0("^sin\\(", xp, "\\)$"),
-      paste0("^cos\\(", xp, "\\)$")
-    )
-    any(vapply(patterns, function(p) grepl(p, nm), logical(1)))
+
+    # Safety: only allow characters that appear in legitimate math expressions
+    if (!grepl("^[A-Za-z0-9_.*/+^()\\s-]+$", nm)) return(FALSE)
+
+    # Must reference at least one defined X variable (whole-word)
+    has_xvar <- any(vapply(x_vars, function(xn) {
+      grepl(paste0("\\b", xn, "\\b"), nm)
+    }, logical(1)))
+    if (!has_xvar) return(FALSE)
+
+    # Must parse as valid R expression
+    ok <- tryCatch({ parse(text = nm); TRUE }, error = function(e) FALSE)
+    ok
   }
 
   # Check extra Data columns that are not explicitly defined in Definition.
@@ -327,7 +329,7 @@ validate_excel_upload <- function(path, normalize_sheet_name) {
       return(fail(sprintf(
         paste0(
           "Data sheet contains column(s) not defined in Definition and not recognized as supported derived-variable names: %s. ",
-          "Allowed derived examples based on Definition-defined continuous X are forms such as X1*X2, 1/X1, exp(X1), exp(-X1), log(X1)."
+          "Allowed derived columns must be valid R expressions referencing at least one Definition-defined continuous X (e.g. X1^2, X1*X2, exp(-X1/10), log(X1/100), 10*X1)."
         ),
         paste(bad_extra, collapse = ", ")
       )))
